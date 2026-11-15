@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Linha</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Linha">
+<meta name="theme-color" content="#101722">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+:root{--bg:#101722;--panel:#182233;--line:#26334a;--text:#e9eef7;--muted:#8fa0ba;--accent:#ff7a59;--r:14px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 "Avenir Next","Segoe UI",system-ui,sans-serif}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+[hidden]{display:none!important}
+button,input,select{font:inherit;color:inherit}
+input,select{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;width:100%}
+input:focus,select:focus,button:focus-visible,li:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#1a0d08;font-weight:700}
+#login{max-width:420px;margin:0 auto;padding:12vh 20px 20px;display:grid;gap:12px}
+#login h1{font-size:2rem;margin:0 0 4px;letter-spacing:-.02em}
+#login p{margin:0 0 8px;color:var(--muted)}
+#err{color:#ff9d86;min-height:1.4em;margin:0}
+#player{position:sticky;top:0;z-index:5;background:#000}
+video{width:100%;max-height:42vh;display:block;background:#000}
+#now{padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);color:var(--muted);min-height:44px}
+#now b{color:var(--text)}
+.bar{display:grid;grid-template-columns:1fr;gap:8px;padding:12px 14px 4px}
+@media(min-width:600px){.bar{grid-template-columns:2fr 1fr}}
+.tabs{display:flex;gap:8px;padding:8px 14px}
+.tabs button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.tabs .sp{flex:1}
+ul{list-style:none;margin:0;padding:0 14px 24px;display:grid;gap:6px}
+li{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;cursor:pointer}
+li[aria-current=true]{border-color:var(--accent)}
+li img{width:40px;height:40px;object-fit:contain;border-radius:8px;background:#0c121b;flex:none}
+li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+li .fav{background:none;border:0;font-size:1.3rem;padding:6px 8px;color:var(--muted)}
+li .fav[aria-pressed=true]{color:var(--accent)}
+.empty{color:var(--muted);padding:20px 14px}
+</style>
+</head>
+<body>
+
+<section id="login">
+  <h1>Linha</h1>
+  <p>Liga a tua conta Xtream para ver os canais.</p>
+  <input id="srv" placeholder="Servidor (ex.: http://exemplo.com:8080)" autocapitalize="off" autocorrect="off" inputmode="url">
+  <input id="usr" placeholder="Utilizador" autocapitalize="off" autocorrect="off">
+  <input id="pwd" placeholder="Palavra-passe" type="password">
+  <button id="go" class="primary">Ligar</button>
+  <p id="err" role="alert"></p>
+</section>
+
+<main id="app" hidden>
+  <div id="player">
+    <video id="v" controls playsinline autoplay></video>
+    <div id="now">Escolhe um canal</div>
+  </div>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Pesquisar canal">
+    <select id="cat" aria-label="Categoria"></select>
+  </div>
+  <div class="tabs">
+    <button id="tAll" aria-pressed="true">Canais</button>
+    <button id="tFav" aria-pressed="false">Favoritos</button>
+    <span class="sp"></span>
+    <button id="out">Sair</button>
+  </div>
+  <ul id="list"></ul>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
+<script>
+(function(){
+  var $ = function(id){return document.getElementById(id)};
+  var S = {base:'',u:'',p:'',cats:[],chans:[],favs:[],tab:'all',limit:150,cur:null,hls:null};
+  var KEY = 'linha.conta', FKEY = 'linha.favs';
+
+  function load(k, d){ try{ var v = localStorage.getItem(k); return v ? JSON.parse(v) : d }catch(e){ return d } }
+  function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){} }
+
+  function api(action, extra){
+    var url = S.base + '/player_api.php?username=' + encodeURIComponent(S.u) + '&password=' + encodeURIComponent(S.p) + (action ? '&action=' + action : '') + (extra || '');
+    return fetch(url).then(function(r){ if(!r.ok) throw new Error('Servidor respondeu ' + r.status); return r.json() });
+  }
+
+  function connect(srv, u, p){
+    srv = srv.trim().replace(/\/+$/, '');
+    if(!/^https?:\/\//i.test(srv)) srv = 'http://' + srv;
+    S.base = srv; S.u = u.trim(); S.p = p;
+    $('err').textContent = '';
+    $('go').disabled = true; $('go').textContent = 'A ligar…';
+    return api().then(function(info){
+      if(!info.user_info || String(info.user_info.auth) !== '1') throw new Error('Utilizador ou palavra-passe incorretos.');
+      return Promise.all([api('get_live_categories'), api('get_live_streams')]);
+    }).then(function(res){
+      S.cats = res[0] || []; S.chans = res[1] || [];
+      save(KEY, {srv:S.base, u:S.u, p:S.p});
+      S.favs = load(FKEY, []);
+      $('login').hidden = true; $('app').hidden = false;
+      buildCats(); render();
+    }).catch(function(e){
+      $('err').textContent = 'Não foi possível ligar. ' + (e.message || '') + ' Verifica o servidor e os dados.';
+    }).then(function(){ $('go').disabled = false; $('go').textContent = 'Ligar'; });
+  }
+
+  function buildCats(){
+    var sel = $('cat'); sel.textContent = '';
+    var all = document.createElement('option'); all.value = ''; all.textContent = 'Todas as categorias'; sel.appendChild(all);
+    S.cats.forEach(function(c){
+      var o = document.createElement('option'); o.value = c.category_id; o.textContent = c.category_name; sel.appendChild(o);
+    });
+  }
+
+  function filtered(){
+    var q = $('q').value.trim().toLowerCase(), cat = $('cat').value;
+    return S.chans.filter(function(c){
+      if(S.tab === 'fav' && S.favs.indexOf(String(c.stream_id)) < 0) return false;
+      if(cat && String(c.category_id) !== cat) return false;
+      return !q || String(c.name).toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  function render(){
+    var ul = $('list'); ul.textContent = '';
+    var items = filtered();
+    if(!items.length){
+      var e = document.createElement('div'); e.className = 'empty';
+      e.textContent = S.tab === 'fav' ? 'Ainda não tens favoritos. Toca na estrela de um canal para o guardar.' : 'Nenhum canal encontrado.';
+      ul.appendChild(e); return;
+    }
+    items.slice(0, S.limit).forEach(function(c){
+      var id = String(c.stream_id);
+      var li = document.createElement('li'); li.tabIndex = 0;
+      if(S.cur === id) li.setAttribute('aria-current', 'true');
+      var img = document.createElement('img'); img.alt = ''; img.loading = 'lazy';
+      if(c.stream_icon) img.src = c.stream_icon;
+      img.onerror = function(){ img.removeAttribute('src') };
+      var name = document.createElement('span'); name.textContent = c.name;
+      var fav = document.createElement('button'); fav.className = 'fav';
+      var isFav = S.favs.indexOf(id) >= 0;
+      fav.textContent = isFav ? '★' : '☆'; fav.setAttribute('aria-pressed', isFav);
+      fav.setAttribute('aria-label', isFav ? 'Remover dos favoritos' : 'Adicionar aos favoritos');
+      fav.onclick = function(ev){ ev.stopPropagation(); toggleFav(id) };
+      li.append(img, name, fav);
+      li.onclick = function(){ play(c) };
+      li.onkeydown = function(ev){ if(ev.key === 'Enter') play(c) };
+      ul.appendChild(li);
+    });
+    if(items.length > S.limit){
+      var more = document.createElement('button'); more.textContent = 'Mostrar mais (' + (items.length - S.limit) + ')';
+      more.onclick = function(){ S.limit += 150; render() };
+      ul.appendChild(more);
+    }
+  }
+
+  function toggleFav(id){
+    var i = S.favs.indexOf(id);
+    if(i >= 0) S.favs.splice(i, 1); else S.favs.push(id);
+    save(FKEY, S.favs); render();
+  }
+
+  function play(c){
+    S.cur = String(c.stream_id);
+    var url = S.base + '/live/' + encodeURIComponent(S.u) + '/' + encodeURIComponent(S.p) + '/' + c.stream_id + '.m3u8';
+    var v = $('v');
+    if(S.hls){ S.hls.destroy(); S.hls = null; }
+    $('now').innerHTML = ''; var b = document.createElement('b'); b.textContent = c.name; $('now').appendChild(b);
+    if(v.canPlayType('application/vnd.apple.mpegurl')){
+      v.src = url; v.play().catch(function(){});
+    } else if(window.Hls && Hls.isSupported()){
+      S.hls = new Hls(); S.hls.loadSource(url); S.hls.attachMedia(v);
+      S.hls.on(Hls.Events.ERROR, function(_, d){ if(d.fatal) $('now').textContent = 'Este canal não está a responder. Tenta outro.'; });
+      v.play().catch(function(){});
+    } else {
+      $('now').textContent = 'Este dispositivo não suporta este formato.';
+    }
+    render();
+  }
+
+  $('go').onclick = function(){ connect($('srv').value, $('usr').value, $('pwd').value) };
+  $('pwd').onkeydown = function(e){ if(e.key === 'Enter') $('go').click() };
+  $('q').oninput = function(){ S.limit = 150; render() };
+  $('cat').onchange = function(){ S.limit = 150; render() };
+  $('tAll').onclick = function(){ S.tab = 'all'; $('tAll').setAttribute('aria-pressed', true); $('tFav').setAttribute('aria-pressed', false); S.limit = 150; render() };
+  $('tFav').onclick = function(){ S.tab = 'fav'; $('tFav').setAttribute('aria-pressed', true); $('tAll').setAttribute('aria-pressed', false); render() };
+  $('out').onclick = function(){
+    try{ localStorage.removeItem(KEY) }catch(e){}
+    if(S.hls){ S.hls.destroy(); S.hls = null; }
+    $('v').removeAttribute('src'); $('v').load();
+    $('app').hidden = true; $('login').hidden = false; $('pwd').value = '';
+  };
+
+  var saved = load(KEY, null);
+  if(saved){ $('srv').value = saved.srv; $('usr').value = saved.u; $('pwd').value = saved.p; connect(saved.srv, saved.u, saved.p); }
+})();
+</script>
+</body>
+</html>
