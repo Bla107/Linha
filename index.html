@@ -169,12 +169,43 @@ li .fav[aria-pressed=true]{color:var(--accent)}
     save(FKEY, S.favs); render();
   }
 
+  function hide(t){
+    try{ t = decodeURIComponent(t) }catch(e){}
+    [S.u, S.p].forEach(function(x){ if(x) t = t.split(x).join('***') });
+    return t;
+  }
+
+  function diag(url){
+    var out = [];
+    function step(u, d){
+      return fetch(u).then(function(r){
+        return r.text().then(function(t){
+          out.push('Lista ' + r.status + ' | ' + (r.headers.get('content-type') || '?') + ' | ' + t.split('\n').length + ' linhas');
+          var first = t.split('\n').map(function(x){ return x.trim() }).filter(function(x){ return x && x[0] !== '#' })[0];
+          if(!first){ out.push('Sem itens: ' + hide(t).replace(/\s+/g, ' ').slice(0, 120)); return; }
+          out.push('Item: ' + hide(first).slice(0, 90));
+          if(/m3u8/i.test(hide(first)) && d < 2) return step(first, d + 1);
+          return fetch(first, {headers:{Range:'bytes=0-1023'}}).then(function(sg){
+            out.push('Segmento ' + sg.status + ' | ' + (sg.headers.get('content-type') || '?'));
+            return sg.arrayBuffer().then(function(b){ out.push(b.byteLength + ' bytes') });
+          });
+        });
+      });
+    }
+    step(url, 0).catch(function(e){ out.push('Falha: ' + e.message) }).then(function(){
+      $('now').style.whiteSpace = 'pre-wrap';
+      $('now').textContent = out.join('\n');
+    });
+  }
+
   function play(c){
     S.cur = String(c.stream_id);
     var url = prox(S.base + '/live/' + encodeURIComponent(S.u) + '/' + encodeURIComponent(S.p) + '/' + c.stream_id + '.m3u8');
     var v = $('v');
+    v.onerror = function(){ diag(url) };
+    clearTimeout(S.t); S.t = setTimeout(function(){ diag(url) }, 6000);
     if(S.hls){ S.hls.destroy(); S.hls = null; }
-    $('now').innerHTML = ''; var b = document.createElement('b'); b.textContent = c.name; $('now').appendChild(b);
+    $('now').style.whiteSpace = ''; $('now').innerHTML = ''; var b = document.createElement('b'); b.textContent = c.name + '  (v3)'; $('now').appendChild(b);
     if(v.canPlayType('application/vnd.apple.mpegurl')){
       v.src = url; v.play().catch(function(){});
     } else if(window.Hls && Hls.isSupported()){
