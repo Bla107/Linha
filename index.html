@@ -52,6 +52,7 @@ li .fav[aria-pressed=true]{color:var(--accent)}
   <input id="srv" placeholder="Servidor (ex.: http://exemplo.com:8080)" autocapitalize="off" autocorrect="off" inputmode="url">
   <input id="usr" placeholder="Utilizador" autocapitalize="off" autocorrect="off">
   <input id="pwd" placeholder="Palavra-passe" type="password">
+  <input id="prx" placeholder="Proxy (só se o servidor for http://)" autocapitalize="off" autocorrect="off" inputmode="url">
   <button id="go" class="primary">Ligar</button>
   <p id="err" role="alert"></p>
 </section>
@@ -78,21 +79,24 @@ li .fav[aria-pressed=true]{color:var(--accent)}
 <script>
 (function(){
   var $ = function(id){return document.getElementById(id)};
-  var S = {base:'',u:'',p:'',cats:[],chans:[],favs:[],tab:'all',limit:150,cur:null,hls:null};
+  var S = {base:'',u:'',p:'',proxy:'',cats:[],chans:[],favs:[],tab:'all',limit:150,cur:null,hls:null};
   var KEY = 'linha.conta', FKEY = 'linha.favs';
 
   function load(k, d){ try{ var v = localStorage.getItem(k); return v ? JSON.parse(v) : d }catch(e){ return d } }
   function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){} }
 
+  function prox(url){ return S.proxy ? S.proxy + '?u=' + encodeURIComponent(url) : url }
+
   function api(action, extra){
     var url = S.base + '/player_api.php?username=' + encodeURIComponent(S.u) + '&password=' + encodeURIComponent(S.p) + (action ? '&action=' + action : '') + (extra || '');
-    return fetch(url).then(function(r){ if(!r.ok) throw new Error('Servidor respondeu ' + r.status); return r.json() });
+    return fetch(prox(url)).then(function(r){ if(!r.ok) throw new Error('Servidor respondeu ' + r.status); return r.json() });
   }
 
-  function connect(srv, u, p){
+  function connect(srv, u, p, px){
     srv = srv.trim().replace(/\/+$/, '');
     if(!/^https?:\/\//i.test(srv)) srv = 'http://' + srv;
     S.base = srv; S.u = u.trim(); S.p = p;
+    S.proxy = (px || '').trim().replace(/\/+$/, '');
     $('err').textContent = '';
     $('go').disabled = true; $('go').textContent = 'A ligar…';
     return api().then(function(info){
@@ -100,7 +104,7 @@ li .fav[aria-pressed=true]{color:var(--accent)}
       return Promise.all([api('get_live_categories'), api('get_live_streams')]);
     }).then(function(res){
       S.cats = res[0] || []; S.chans = res[1] || [];
-      save(KEY, {srv:S.base, u:S.u, p:S.p});
+      save(KEY, {srv:S.base, u:S.u, p:S.p, px:S.proxy});
       S.favs = load(FKEY, []);
       $('login').hidden = true; $('app').hidden = false;
       buildCats(); render();
@@ -167,7 +171,7 @@ li .fav[aria-pressed=true]{color:var(--accent)}
 
   function play(c){
     S.cur = String(c.stream_id);
-    var url = S.base + '/live/' + encodeURIComponent(S.u) + '/' + encodeURIComponent(S.p) + '/' + c.stream_id + '.m3u8';
+    var url = prox(S.base + '/live/' + encodeURIComponent(S.u) + '/' + encodeURIComponent(S.p) + '/' + c.stream_id + '.m3u8');
     var v = $('v');
     if(S.hls){ S.hls.destroy(); S.hls = null; }
     $('now').innerHTML = ''; var b = document.createElement('b'); b.textContent = c.name; $('now').appendChild(b);
@@ -183,7 +187,7 @@ li .fav[aria-pressed=true]{color:var(--accent)}
     render();
   }
 
-  $('go').onclick = function(){ connect($('srv').value, $('usr').value, $('pwd').value) };
+  $('go').onclick = function(){ connect($('srv').value, $('usr').value, $('pwd').value, $('prx').value) };
   $('pwd').onkeydown = function(e){ if(e.key === 'Enter') $('go').click() };
   $('q').oninput = function(){ S.limit = 150; render() };
   $('cat').onchange = function(){ S.limit = 150; render() };
@@ -197,7 +201,7 @@ li .fav[aria-pressed=true]{color:var(--accent)}
   };
 
   var saved = load(KEY, null);
-  if(saved){ $('srv').value = saved.srv; $('usr').value = saved.u; $('pwd').value = saved.p; connect(saved.srv, saved.u, saved.p); }
+  if(saved){ $('srv').value = saved.srv; $('usr').value = saved.u; $('pwd').value = saved.p; $('prx').value = saved.px || ''; connect(saved.srv, saved.u, saved.p, saved.px); }
 })();
 </script>
 </body>
